@@ -1,0 +1,197 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  KLIK
+}
+
+enum Strategy {
+  ROUND_ROBIN
+  WEIGHTED
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  name         String
+  passwordHash String
+  isAdmin      Boolean      @default(false)
+  pausedAt     DateTime?
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+}
+
+model Workspace {
+  id        String       @id @default(uuid())
+  name      String
+  plan      Plan         @default(FREE)
+  timezone    String       @default("Asia/Jerusalem")
+  trialEndsAt DateTime?
+  paidUntil   DateTime?
+  createdAt   DateTime     @default(now())
+  members     Membership[]
+  links       KlikLink[]
+  leads       KlikLead[]
+  invites     Invite[]
+  payments    Payment[]
+  tickets     SupportTicket[]
+}
+
+model Membership {
+  id          String    @id @default(uuid())
+  userId      String
+  workspaceId String
+  role        String    @default("OWNER")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model KlikLink {
+  id         String       @id @default(uuid())
+  workspaceId String
+  workspace  Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  slug       String       @unique
+  name       String
+  strategy   Strategy     @default(ROUND_ROBIN)
+  prefill    String       @default("")
+  isActive   Boolean      @default(true)
+  /// 0 = off. Otherwise the same browser returns to the same number for this many days.
+  stickyDays Int          @default(0)
+  kind       String       @default("ROTATOR")
+  cursor     Int          @default(0)
+  createdAt  DateTime     @default(now())
+  numbers    KlikNumber[]
+  events     KlikEvent[]
+
+  @@index([workspaceId])
+}
+
+model KlikNumber {
+  id          String     @id @default(uuid())
+  linkId      String
+  link        KlikLink   @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  label       String
+  phoneE164   String
+  weight      Int        @default(1)
+  isActive    Boolean    @default(true)
+  /// 0 = no daily cap.
+  dailyCap    Int        @default(0)
+  capDay      String     @default("")
+  capCount    Int        @default(0)
+  /// Inclusive start hour in the workspace timezone. Null = always on.
+  hourStart   Int?
+  hourEnd     Int?
+  startsCount Int        @default(0)
+  events      KlikEvent[]
+
+  @@index([linkId])
+}
+
+model KlikEvent {
+  id          String     @id @default(uuid())
+  linkId      String
+  link        KlikLink   @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  numberId    String
+  number      KlikNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
+  utmSource   String     @default("")
+  utmMedium   String     @default("")
+  utmCampaign String     @default("")
+  note        String     @default("")
+  status      String     @default("OPEN")
+  device      String     @default("")
+  country     String     @default("")
+  createdAt   DateTime   @default(now())
+
+  @@index([linkId, createdAt])
+}
+
+model KlikLead {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  phone       String    @default("")
+  stage       String    @default("NEW")
+  valueUsd    Int       @default(0)
+  followUpAt  DateTime?
+  note        String    @default("")
+  source      String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, stage])
+}
+
+model Invite {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  role        String    @default("MEMBER")
+  token       String    @unique
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+model LaunchStock {
+  id        String @id @default("launch")
+  remaining Int    @default(300)
+}
+
+model PaymentConfig {
+  id           String  @id @default("paypal")
+  env          String  @default("sandbox")
+  clientId     String  @default("")
+  clientSecret String  @default("")
+  cardEnabled  Boolean @default(true)
+}
+
+model Coupon {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  percentOff Int
+  maxUses   Int?
+  usedCount Int       @default(0)
+  expiresAt DateTime?
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  payments  Payment[]
+}
+
+model Payment {
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  paypalOrderId String    @unique
+  amount        String
+  currency      String
+  status        String
+  paidUntil     DateTime?
+  couponId      String?
+  coupon        Coupon?   @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+model SupportTicket {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  message     String
+  priority    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
