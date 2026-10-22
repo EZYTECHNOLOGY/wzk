@@ -97,7 +97,7 @@ export default function Shell({
       <div className="nav-backdrop" onClick={() => setOpen(false)} />
       <aside id="app-nav" className="side" inert={compact && !open ? true : undefined}>
         <Link href={locked ? "/dashboard/plan" : "/dashboard"} className="brand" onClick={() => setOpen(false)}>
-          <span className="brand-mark">Wzk.io</span>
+          <span className="brand-mark">WZK</span>
           <strong>Who Ze Klik</strong>
         </Link>
         {workspace.length > 0 && (

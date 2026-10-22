@@ -76,10 +76,12 @@ export default function PayPalCheckout({
   currency,
   onPaid,
   code = "",
+  email = "",
 }: {
   currency: "ILS" | "USD";
   onPaid: (until: string) => void;
   code?: string;
+  email?: string;
 }) {
   const slot = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
@@ -141,7 +143,7 @@ export default function PayPalCheckout({
           const res = await fetch("/api/paypal/order", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ currency, code }),
+            body: JSON.stringify({ currency, code, email: email || undefined }),
           });
           const json = await res.json();
           if (res.ok && json.granted && json.paidUntil) {
@@ -198,7 +200,7 @@ export default function PayPalCheckout({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [code, currency, lang, onPaid]);
+  }, [code, currency, email, lang, onPaid]);
 
   if (ready === false) return <p className="muted">{t.paypal}</p>;
   return (

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import localFont from "next/font/local";
-import { Heebo } from "next/font/google";
+import { Heebo, Rubik } from "next/font/google";
 import "./globals.css";
 
 const gveret = localFont({
@@ -11,6 +11,7 @@ const gveret = localFont({
   weight: "400",
 });
 const heebo = Heebo({ subsets: ["hebrew", "latin"], variable: "--font-heebo" });
+const rubik = Rubik({ subsets: ["hebrew", "latin"], weight: ["700", "900"], variable: "--font-rubik" });
 
 export const metadata: Metadata = {
   title: "Wzk.io — Who Ze Klik",
@@ -28,7 +29,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const he = jar.get("wzk_lang")?.value !== "en";
   return (
     <html lang={he ? "he" : "en"} dir={he ? "rtl" : "ltr"}>
-      <body className={`${gveret.variable} ${heebo.variable}`}>{children}</body>
+      <body className={`${gveret.variable} ${heebo.variable} ${rubik.variable}`}>{children}</body>
     </html>
   );
 }

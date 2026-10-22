@@ -6,9 +6,10 @@ import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ paid?: string }> }) {
   if (await getSession()) redirect("/dashboard");
   const jar = await cookies();
   const lang: Lang = jar.get("wzk_lang")?.value === "en" ? "en" : "he";
-  return <AuthScreen mode="login" initialLang={lang} />;
+  const query = await searchParams;
+  return <AuthScreen mode="login" initialLang={lang} paid={query.paid === "1"} />;
 }

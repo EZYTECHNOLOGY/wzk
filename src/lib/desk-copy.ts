@@ -26,6 +26,7 @@ const heErrors: Record<string, string> = {
   "PayPal secret is required.": "צריך את הסוד של פייפאל.",
   "Choose ILS or USD.": "בחרו שקל או דולר.",
   "This workspace already has the 3-year plan.": "לסביבה הזו כבר יש תוכנית לשלוש שנים.",
+  "No account for that email. Sign up first.": "אין חשבון לאימייל הזה. קודם נרשמים.",
   "Launch stock is gone.": "מלאי ההשקה נגמר.",
   "The trial week has ended.": "שבוע הניסיון נגמר.",
   "WhatsApp seat limit reached for this plan.": "הגעתם למכסת מספרי הוואטסאפ בתוכנית.",
