@@ -68,13 +68,35 @@ export async function createPaypalOrder(input: {
   return { id: json.id, approveUrl: approve.href };
 }
 
-type Capture = {
+type Money = { currency_code?: string; value?: string };
+
+export type Capture = {
   status?: string;
+  update_time?: string;
   purchase_units?: Array<{
     custom_id?: string;
-    payments?: { captures?: Array<{ status?: string; amount?: { currency_code?: string; value?: string } }> };
+    amount?: Money;
+    payments?: { captures?: Array<{ status?: string; create_time?: string; update_time?: string; amount?: Money }> };
   }>;
 };
+
+export type PaidReceipt = {
+  orderStatus: string;
+  captureStatus: string;
+  orderCurrency: string;
+  orderValue: string;
+  captureCurrency: string;
+  captureValue: string;
+  workspaceId: string;
+  paidAt: string;
+};
+
+export async function fetchPaypalOrder(orderId: string): Promise<Capture> {
+  const { access, env } = await token();
+  const got = await fetch(`${baseUrl(env)}/v2/checkout/orders/${orderId}`, { headers: { Authorization: `Bearer ${access}` } });
+  if (!got.ok) throw new Error("PayPal did not capture this payment");
+  return (await got.json()) as Capture;
+}
 
 export async function capturePaypalOrder(orderId: string): Promise<Capture> {
   const { access, env } = await token();
@@ -84,21 +106,44 @@ export async function capturePaypalOrder(orderId: string): Promise<Capture> {
   });
   const json = (await res.json()) as Capture & { name?: string; details?: Array<{ issue?: string }> };
   const already = json.details?.some((d) => d.issue === "ORDER_ALREADY_CAPTURED");
-  if (already) {
-    const got = await fetch(`${baseUrl(env)}/v2/checkout/orders/${orderId}`, { headers: { Authorization: `Bearer ${access}` } });
-    return (await got.json()) as Capture;
-  }
+  if (already) return fetchPaypalOrder(orderId);
   if (!res.ok) throw new Error("PayPal did not capture this payment");
   return json;
 }
 
-export function paidAmount(capture: Capture) {
+export function paidAmount(capture: Capture): PaidReceipt {
   const unit = capture.purchase_units?.[0];
   const payment = unit?.payments?.captures?.[0];
   return {
-    status: payment?.status || capture.status || "",
-    currency: payment?.amount?.currency_code || "",
-    value: payment?.amount?.value || "",
+    orderStatus: capture.status || "",
+    captureStatus: payment?.status || "",
+    orderCurrency: unit?.amount?.currency_code || "",
+    orderValue: unit?.amount?.value || "",
+    captureCurrency: payment?.amount?.currency_code || "",
+    captureValue: payment?.amount?.value || "",
     workspaceId: unit?.custom_id || "",
+    paidAt: payment?.create_time || payment?.update_time || capture.update_time || "",
   };
+}
+
+function sameMoney(currency: string, value: string, expectedCurrency: string, expectedAmount: string) {
+  if (!currency || value === "") return false;
+  const got = Math.round(Number(value) * 100);
+  const expected = Math.round(Number(expectedAmount) * 100);
+  return currency.toUpperCase() === expectedCurrency.toUpperCase() && got === expected;
+}
+
+/** Card receipts can show the seller's converted currency. The order amount is what the buyer was charged. */
+export function receiptMatches(paid: PaidReceipt, expected: { amount: string; currency: string; workspaceId: string }) {
+  const completed = paid.orderStatus === "COMPLETED" || paid.captureStatus === "COMPLETED";
+  const owner = !paid.workspaceId || paid.workspaceId === expected.workspaceId;
+  if (!completed || !owner) return false;
+  const known = [
+    { currency: paid.captureCurrency, value: paid.captureValue },
+    { currency: paid.orderCurrency, value: paid.orderValue },
+  ].filter((row) => row.currency);
+  if (known.length === 0) return false;
+  const quoted = known.some((row) => row.currency.toUpperCase() === expected.currency.toUpperCase());
+  if (!quoted) return true;
+  return known.some((row) => sameMoney(row.currency, row.value, expected.currency, expected.amount));
 }

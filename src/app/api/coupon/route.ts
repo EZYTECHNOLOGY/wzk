@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/session";
 import { findLiveCoupon, normalizeCode, quoteCoupon } from "@/lib/coupons";
 
 export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Sign in" }, { status: 401 });
   const parsed = z
     .object({ code: z.string().min(1).max(24), currency: z.enum(["ILS", "USD"]) })
     .safeParse(await req.json().catch(() => null));

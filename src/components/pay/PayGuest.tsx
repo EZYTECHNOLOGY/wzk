@@ -3,15 +3,55 @@
 import Link from "next/link";
 import { useState } from "react";
 import PayPalCheckout from "@/components/PayPalCheckout";
+import { deskCopy, say } from "@/lib/desk-copy";
 import type { Lang } from "@/lib/home-copy";
+
+type Applied = { code: string; percentOff: number; amount: string; currency: "ILS" | "USD"; free: boolean };
 
 export default function PayGuest({ initialLang, failed }: { initialLang: Lang; failed?: boolean }) {
   const [lang] = useState<Lang>(initialLang);
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [applied, setApplied] = useState<Applied | null>(null);
+  const [couponError, setCouponError] = useState("");
   const [readyEmail, setReadyEmail] = useState("");
   const [done, setDone] = useState("");
   const he = lang === "he";
   const currency = he ? "ILS" : "USD";
+  const t = deskCopy[lang].plan;
+
+  async function applyCoupon() {
+    setCouponError("");
+    const res = await fetch("/api/coupon", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, currency }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setApplied(null);
+      setCouponError(say(lang, json.error || "That coupon is not valid."));
+      return;
+    }
+    setApplied(json);
+  }
+
+  async function redeemFree() {
+    setCouponError("");
+    const account = email.trim().toLowerCase();
+    if (!account || !applied) return;
+    const res = await fetch("/api/paypal/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currency: applied.currency, code: applied.code, email: account }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.paidUntil) {
+      setCouponError(say(lang, json.error || "That coupon is not valid."));
+      return;
+    }
+    setDone(json.paidUntil);
+  }
 
   return (
     <div className="storefront min-h-dvh bg-paper px-4 py-10 text-ink">
@@ -43,12 +83,23 @@ export default function PayGuest({ initialLang, failed }: { initialLang: Lang; f
                 {he ? "אימייל החשבון" : "Account email"}
                 <input className="field" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
               </label>
-              <button className="btn" type="submit">{he ? "להמשיך לתשלום" : "Continue to payment"}</button>
+              <label className="grid gap-2 text-sm font-bold">
+                {t.coupon}
+                <input className="field" dir="ltr" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" />
+              </label>
+              <button className="btn" type="button" onClick={() => applyCoupon().catch(() => setCouponError(say(lang, "That coupon is not valid.")))}>{t.couponApply}</button>
+              {couponError && <p className="font-bold" style={{ color: "#9a1230" }}>{couponError}</p>}
+              {applied && <p className="font-bold">{t.couponOff(applied.percentOff)} · {applied.currency === "ILS" ? `${applied.amount} ₪` : `${applied.amount} USD`}</p>}
+              {applied?.free ? (
+                <button className="btn" type="button" onClick={() => redeemFree().catch(() => setCouponError(say(lang, "That coupon is not valid.")))}>{t.couponUse}</button>
+              ) : (
+                <button className="btn" type="submit">{he ? "להמשיך לתשלום" : "Continue to payment"}</button>
+              )}
             </form>
           )}
-          {readyEmail && !done && (
+          {readyEmail && !done && !applied?.free && (
             <div className="mt-4">
-              <PayPalCheckout key={readyEmail} currency={currency} email={readyEmail} onPaid={setDone} />
+              <PayPalCheckout key={`${readyEmail}:${applied?.code ?? ""}`} currency={currency} email={readyEmail} code={applied?.code ?? ""} lang={lang} onPaid={setDone} />
             </div>
           )}
         </section>

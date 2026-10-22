@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/components/LangProvider";
 import { deskCopy, say } from "@/lib/desk-copy";
+import type { Lang } from "@/lib/home-copy";
 
 type SdkButton = {
   isEligible: () => boolean;
@@ -54,7 +55,6 @@ function loadClassic(clientId: string, currency: "ILS" | "USD", card: boolean) {
     script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${currency}&intent=capture&components=buttons${funding}&disable-funding=paylater,venmo`;
     script.async = true;
     script.dataset.wzkPaypal = "buttons";
-    script.setAttribute("data-popups-disabled", "true");
     script.onload = () => {
       if (!window.paypal?.Buttons) {
         reject(new Error("PayPal did not start"));
@@ -77,17 +77,21 @@ export default function PayPalCheckout({
   onPaid,
   code = "",
   email = "",
+  lang: langProp,
 }: {
   currency: "ILS" | "USD";
   onPaid: (until: string) => void;
   code?: string;
   email?: string;
+  lang?: Lang;
 }) {
   const slot = useRef<HTMLDivElement>(null);
+  const reported = useRef("");
   const [error, setError] = useState("");
   const [ready, setReady] = useState<boolean | null>(null);
   const [, setCardEnabled] = useState(true);
-  const { lang } = useLang();
+  const { lang: contextLang } = useLang();
+  const lang = langProp ?? contextLang;
   const t = deskCopy[lang].plan;
 
   useEffect(() => {
@@ -147,11 +151,13 @@ export default function PayPalCheckout({
           });
           const json = await res.json();
           if (res.ok && json.granted && json.paidUntil) {
+            reported.current = "granted";
             onPaid(json.paidUntil);
             throw new Error("granted");
           }
           if (!res.ok || !json.id) {
             const message = say(lang, json.error || "Could not start checkout");
+            reported.current = message;
             setError(message);
             throw new Error(message);
           }
@@ -165,13 +171,18 @@ export default function PayPalCheckout({
           });
           const json = await res.json();
           if (!res.ok) {
-            setError(say(lang, json.error || "Payment was not granted"));
+            const message = say(lang, json.error || "Payment was not granted");
+            reported.current = message;
+            setError(message);
             return;
           }
           onPaid(json.paidUntil);
         },
         onCancel: () => {},
-        onError: () => setError(say(lang, "Could not start checkout")),
+        onError: () => {
+          if (reported.current === "granted" || reported.current) return;
+          setError(say(lang, "Could not start checkout"));
+        },
       };
       const paypalSlot = document.createElement("div");
       holder.appendChild(paypalSlot);

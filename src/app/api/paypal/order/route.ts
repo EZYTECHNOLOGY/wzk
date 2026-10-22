@@ -7,6 +7,7 @@ import { accessOf, priceFor } from "@/lib/plans";
 import { findLiveCoupon, normalizeCode, quoteCoupon } from "@/lib/coupons";
 import { grantLaunchAccess } from "@/lib/grant";
 import { createPaypalOrder, paypalConfigured } from "@/lib/paypal";
+import { recoverPaidOrder } from "@/lib/paypal-settle";
 import { sendPurchaseMail } from "@/lib/mail";
 
 export async function POST(req: Request) {
@@ -38,6 +39,8 @@ export async function POST(req: Request) {
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
   if (!workspace) return NextResponse.json({ error: "Missing workspace" }, { status: 404 });
   if (accessOf(workspace) === "paid") return NextResponse.json({ error: "This workspace already has the 3-year plan." }, { status: 409 });
+  const healed = await recoverPaidOrder(workspace.id);
+  if (healed) return NextResponse.json({ granted: true, paidUntil: healed });
   const stock = await prisma.launchStock.findUnique({ where: { id: "launch" } });
   if (!stock || stock.remaining <= 0) return NextResponse.json({ error: "Launch stock is gone." }, { status: 409 });
 

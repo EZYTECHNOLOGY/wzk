@@ -7,8 +7,10 @@ export async function grantLaunchAccess(input: {
   amount: string;
   currency: string;
   couponId?: string | null;
+  paidAt?: Date | null;
 }) {
-  const paidUntil = addYears(new Date(), PAID_YEARS);
+  const start = input.paidAt && !Number.isNaN(input.paidAt.getTime()) ? input.paidAt : new Date();
+  const paidUntil = addYears(start, PAID_YEARS);
   await prisma.$transaction(async (tx) => {
     const again = await tx.payment.findUnique({ where: { paypalOrderId: input.paypalOrderId } });
     if (again?.status === "CAPTURED") return;
