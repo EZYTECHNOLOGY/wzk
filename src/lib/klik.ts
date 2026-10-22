@@ -18,10 +18,19 @@ export function waUrl(phoneE164: string, prefill: string): string {
   return text ? `${base}?text=${encodeURIComponent(text)}` : base;
 }
 
-export function pickRoundRobin<T>(targets: T[], cursor: number): { target: T; nextCursor: number } | null {
+/** Never-clicked numbers sort first. Equal click times keep the list order of `targets`. */
+export function pickOldestClick<T extends { id: string }>(targets: T[], lastClickMs: ReadonlyMap<string, number>): T | null {
   if (targets.length === 0) return null;
-  const idx = ((cursor % targets.length) + targets.length) % targets.length;
-  return { target: targets[idx], nextCursor: (idx + 1) % targets.length };
+  let best = targets[0];
+  let bestAt = lastClickMs.get(best.id) ?? Number.NEGATIVE_INFINITY;
+  for (let i = 1; i < targets.length; i++) {
+    const at = lastClickMs.get(targets[i].id) ?? Number.NEGATIVE_INFINITY;
+    if (at < bestAt) {
+      best = targets[i];
+      bestAt = at;
+    }
+  }
+  return best;
 }
 
 export function pickWeighted<T extends { weight: number }>(targets: T[], random = Math.random()): T | null {
@@ -75,56 +84,67 @@ export type RouteResult =
 export async function routeKlik(input: RouteInput): Promise<RouteResult> {
   const link = await prisma.klikLink.findUnique({
     where: { slug: input.slug },
-    include: { numbers: true, workspace: true },
+    include: { workspace: true },
   });
   if (!link) return { ok: false, reason: "missing" };
   if (!link.isActive) return { ok: false, reason: "paused" };
   if (await ownersPaused(link.workspaceId)) return { ok: false, reason: "paused" };
   if (accessOf(link.workspace) === "expired") return { ok: false, reason: "expired" };
   const { hour, day } = hourInZone(new Date(), link.workspace.timezone || "UTC");
-  const eligible = link.numbers.filter((n) => {
-    if (!n.isActive) return false;
-    if (!inHours(n, hour)) return false;
-    if (n.dailyCap > 0 && n.capDay === day && n.capCount >= n.dailyCap) return false;
-    return true;
-  });
-  if (eligible.length === 0) return { ok: false, reason: "none" };
 
-  let chosen = input.stickyId ? eligible.find((n) => n.id === input.stickyId) : undefined;
-  let advanceCursor = false;
-  if (!chosen) {
-    if (link.strategy === "WEIGHTED") {
-      chosen = pickWeighted(eligible) ?? undefined;
-    } else {
-      const picked = pickRoundRobin(eligible, link.cursor);
-      chosen = picked?.target;
-      advanceCursor = true;
+  const chosen = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "KlikLink" WHERE "id" = ${link.id} FOR UPDATE`;
+    const numbers = await tx.klikNumber.findMany({
+      where: { linkId: link.id },
+      orderBy: [{ label: "asc" }, { id: "asc" }],
+    });
+    const eligible = numbers.filter((n) => {
+      if (!n.isActive) return false;
+      if (!inHours(n, hour)) return false;
+      if (n.dailyCap > 0 && n.capDay === day && n.capCount >= n.dailyCap) return false;
+      return true;
+    });
+    if (eligible.length === 0) return null;
+
+    let pick = input.stickyId ? eligible.find((n) => n.id === input.stickyId) : undefined;
+    if (!pick) {
+      if (link.strategy === "WEIGHTED") {
+        pick = pickWeighted(eligible) ?? undefined;
+      } else {
+        const latest = await tx.klikEvent.groupBy({
+          by: ["numberId"],
+          where: { linkId: link.id, numberId: { in: eligible.map((n) => n.id) } },
+          _max: { createdAt: true },
+        });
+        const lastClickMs = new Map<string, number>();
+        for (const row of latest) {
+          if (row._max.createdAt) lastClickMs.set(row.numberId, row._max.createdAt.getTime());
+        }
+        pick = pickOldestClick(eligible, lastClickMs) ?? undefined;
+      }
     }
-  }
-  if (!chosen) return { ok: false, reason: "none" };
+    if (!pick) return null;
 
-  const nextCap = chosen.capDay === day ? chosen.capCount + 1 : 1;
-  await prisma.$transaction([
-    prisma.klikEvent.create({
+    const nextCap = pick.capDay === day ? pick.capCount + 1 : 1;
+    await tx.klikEvent.create({
       data: {
         linkId: link.id,
-        numberId: chosen.id,
+        numberId: pick.id,
         utmSource: input.utmSource.slice(0, 80),
         utmMedium: input.utmMedium.slice(0, 80),
         utmCampaign: input.utmCampaign.slice(0, 80),
         device: (input.device || "").slice(0, 20),
         country: (input.country || "").slice(0, 8),
       },
-    }),
-    prisma.klikNumber.update({
-      where: { id: chosen.id },
+    });
+    await tx.klikNumber.update({
+      where: { id: pick.id },
       data: { startsCount: { increment: 1 }, capDay: day, capCount: nextCap },
-    }),
-    ...(advanceCursor
-      ? [prisma.klikLink.update({ where: { id: link.id }, data: { cursor: { increment: 1 } } })]
-      : []),
-  ]);
+    });
+    return pick;
+  });
 
+  if (!chosen) return { ok: false, reason: "none" };
   return { ok: true, url: waUrl(chosen.phoneE164, link.prefill), stickyDays: link.stickyDays, numberId: chosen.id };
 }
 
